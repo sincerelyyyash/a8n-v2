@@ -10,7 +10,9 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi (>=0.116.2,<0.117.0)",
     "uvicorn[standard] (>=0.35.0,<0.36.0)",
-    "sqlalchemy (>=2.0.43,<3.0.0)"
+    "sqlalchemy (>=2.0.43,<3.0.0)",
+    "jwt (>=1.4.0,<2.0.0)",
+    "bcrypt (>=4.3.0,<5.0.0)"
 ]
 
 [tool.poetry]

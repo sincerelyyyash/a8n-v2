@@ -22,7 +22,6 @@ class Node(Base):
     workflow_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("workflow.id"),
-        nullable=False,
     )
     workflow = relationship("Workflow", back_populates="nodes")
 

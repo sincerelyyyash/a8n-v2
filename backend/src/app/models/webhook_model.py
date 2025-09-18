@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer
+from sqlalchemy import String, Integer, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db.db import Base
@@ -7,16 +7,13 @@ from ..core.db.db import Base
 class Webhook(Base):
     __tablename__ = "webhook"
 
-    id: Mapped[int] = mapped_column(
-        "id", autoincrement=True, nullable=False, unique=True, init=False
-    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
-    name: Mapped[str] = mapped_column(String(20))
-    method: Mapped[str] = mapped_column(String(20))
-    path: Mapped[str] = mapped_column(String(20))
+    name: Mapped[str] = mapped_column(String(20), nullable=False)
+    method: Mapped[str] = mapped_column(String(20), nullable=False)
+    path: Mapped[str] = mapped_column(String(20), nullable=False)
     header: Mapped[str] = mapped_column(String(20))
     secret: Mapped[str] = mapped_column(String(30))
-    workflowId: Mapped[int] = mapped_column(
-        Integer, ForeignKey=("workflow.id"), nullable=False
-    )
-    workflow = relationship("Workflow", backpopulates="webhook")
+    workflow_id: Mapped[int] = mapped_column(ForeignKey("workflow.id"), nullable=False)
+
+    workflow = relationship("Workflow", back_populates="webhooks")

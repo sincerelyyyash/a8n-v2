@@ -18,13 +18,13 @@ class Workflow(Base):
 
     name: Mapped[str] = mapped_column(String(18))
     title: Mapped[str] = mapped_column(String(20))
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
     user_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("user.id"),
-        nullable=False,
     )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
     user = relationship("User", back_populates="workflows")
     nodes = relationship("Node", back_populates="workflow")
     connections = relationship("Connection", back_populates="workflow")

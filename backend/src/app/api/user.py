@@ -10,7 +10,7 @@ from ..schemas.user_schema import UserCreate
 router = APIRouter()
 
 
-@router.post("/register")
+@router.post("/signup")
 async def register_user(
     user: UserCreate, response: Response, db: AsyncSession = Depends(async_get_db)
 ):

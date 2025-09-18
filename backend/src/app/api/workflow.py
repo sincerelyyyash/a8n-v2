@@ -1,4 +1,3 @@
-from typing import List
 from app.schemas.workflow_schema import (
     WorkflowAllRead,
     WorkflowCreate,
@@ -8,11 +7,13 @@ from app.schemas.workflow_schema import (
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from . import model
+from ..models.workflow_model import Workflow
+from ..models.node_model import Node
+from ..models.connection_model import Connection
 from ..core.db.db import async_get_db
 
 
-router = APIRouter()
+router = APIRouter(prefix="/api/v1/workflow")
 
 
 @router.post("/create")
@@ -21,9 +22,8 @@ async def create_workflow(
 ):
     try:
         result = await db.execute(
-            select(model.Workflow).where(
-                (model.Workflow.name == workflow.name)
-                | (model.Workflow.title == workflow.title)
+            select(Workflow).where(
+                (Workflow.name == workflow.name) | (Workflow.title == workflow.title)
             )
         )
         existing_wf = result.scalar_one_or_none()
@@ -34,7 +34,7 @@ async def create_workflow(
             )
 
         async with db.begin():
-            new_wf = model.Workflow(
+            new_wf = Workflow(
                 name=workflow.name,
                 title=workflow.title,
                 enabled=workflow.enabled,
@@ -45,7 +45,7 @@ async def create_workflow(
 
             new_nodes = []
             for node in workflow.nodes:
-                n = model.Node(
+                n = Node(
                     positionX=node.positionX,
                     positionY=node.positionY,
                     data=node.data,
@@ -58,7 +58,7 @@ async def create_workflow(
 
             new_conns = []
             for conn in workflow.connections:
-                c = model.Connection(
+                c = Connection(
                     from_node_id=conn.from_node_id,
                     to_node_id=conn.to_node_id,
                     workflow_id=new_wf.id,
@@ -83,8 +83,8 @@ async def getWorkflow(
 ):
     try:
         result = await db.execute(
-            select(model.Workflow).where((model.Workflow.id == workflow.id))
-            & (model.Workflow.user_id == workflow.user_id)
+            select(Workflow).where((Workflow.id == workflow.id))
+            & (Workflow.user_id == workflow.user_id)
         )
         workflow = result.scalar_one_or_none()
 
@@ -105,7 +105,7 @@ async def getAllWorkflow(
 ):
     try:
         result = await db.execute(
-            select(model.Workflow).where(model.Workflow.user_id == workflow.user_id)
+            select(Workflow).where(Workflow.user_id == workflow.user_id)
         )
         workflows = result.scalar.all()
 
@@ -124,8 +124,8 @@ async def deleteWorkflow(
 ):
     try:
         result = await db.execute(
-            select(model.Workflow).where((model.Workflow.id == workflow.id))
-            & (model.Workflow.user_id == workflow.user_id)
+            select(Workflow).where((Workflow.id == workflow.id))
+            & (Workflow.user_id == workflow.user_id)
         )
         workflow = result.scalar_one_or_none()
 
@@ -139,3 +139,4 @@ async def deleteWorkflow(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error {str(e)}")
+

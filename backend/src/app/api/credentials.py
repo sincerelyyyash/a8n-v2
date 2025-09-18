@@ -2,7 +2,6 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from . import model
 from ..core.db.db import async_get_db
 from ..schemas.credential_schema import (
     CredentialAllRead,
@@ -11,9 +10,9 @@ from ..schemas.credential_schema import (
     CredentialRead,
     CredentialUpdate,
 )
+from ..models.credential_model import Credential
 
-
-router = APIRouter()
+router = APIRouter(prefix="/api/v1/credential")
 
 
 @router.post("/create")
@@ -21,7 +20,7 @@ async def add_credentials(
     credential: CredentialCreate, db: AsyncSession = Depends(async_get_db())
 ):
     try:
-        new_cred = model.Credential(
+        new_cred = Credential(
             user_id=credential.user_id,
             title=credential.title,
             platform=credential.platform,
@@ -45,9 +44,9 @@ async def update_credential(
 ):
     try:
         result = await db.execute(
-            select(model.Credential).where(
-                (model.Credential.id == credential.id)
-                & (model.Credential.user_id == credential.user_id)
+            select(Credential).where(
+                (Credential.id == credential.id)
+                & (Credential.user_id == credential.user_id)
             )
         )
         cred = result.scalar_one_or_none()
@@ -82,9 +81,9 @@ async def get_credential(
 ):
     try:
         result = await db.execute(
-            select(model.Credential).where(
-                (model.Credential.id == credential.id)
-                & (model.Credential.user_id == credential.user_id)
+            select(Credential).where(
+                (Credential.id == credential.id)
+                & (Credential.user_id == credential.user_id)
             )
         )
 
@@ -110,8 +109,8 @@ async def get_all_credentials(
 ):
     try:
         results = await db.execute(
-            select(model.Credential).where(
-                (model.Credential.user_id == credential.user_id)
+            select(Credential).where(
+                (Credential.user_id == credential.user_id)
             )
         )
 

@@ -1,7 +1,9 @@
-from sqlalchemy import String, Integer, ForeignKey, Float
+from sqlalchemy import Integer, ForeignKey, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSON
 
 from ..core.db.db import Base
+
 
 class Node(Base):
     __tablename__ = "node"
@@ -24,7 +26,6 @@ class Node(Base):
     )
     workflow = relationship("Workflow", back_populates="nodes")
 
-
     connections_from = relationship(
         "Connection",
         back_populates="from_node",
@@ -37,5 +38,3 @@ class Node(Base):
     )
 
     data: Mapped[dict] = mapped_column(JSON)
-
-

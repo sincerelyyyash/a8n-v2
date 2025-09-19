@@ -21,7 +21,7 @@ class UserCreate(UserBase):
     password: Annotated[
         str,
         Field(
-            pattern=r"^(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z])(?=.*\W).{8,16}$",
+            # pattern=r"^(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z])(?=.*\W).{8,16}$",
             examples=["Str1ngSt!"],
         ),
     ]

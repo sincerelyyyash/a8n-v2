@@ -1,14 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+
 from ..models.user_model import User
 from ..utils.auth_utils import hash_password, verify_password, create_jwt, decode_jwt
-
-
 from ..core.db.db import async_get_db
 from ..schemas.user_schema import UserCreate, UserRead, UserSignIn
 
-router = APIRouter(prefix="/api/v1/user")
+router = APIRouter(prefix="/api/v1/user", tags=["user"])
 
 
 @router.post("/signup")
@@ -44,13 +43,11 @@ async def register_user(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-router.post("/signin")
-
-
+@router.post("/signin")
 async def login_user(
     user: UserSignIn,
     response: Response,
-    db: AsyncSession = Depends(async_get_db()),
+    db: AsyncSession = Depends(async_get_db),
 ):
     try:
         result = await db.execute(select(User).where(User.email == user.email))
@@ -68,12 +65,8 @@ async def login_user(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-router.get("/")
-
-
-async def get_user(
-    token: str | None = None, db: AsyncSession = Depends(async_get_db())
-):
+@router.get("/")
+async def get_user(token: str | None = None, db: AsyncSession = Depends(async_get_db)):
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 

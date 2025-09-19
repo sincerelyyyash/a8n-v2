@@ -13,4 +13,4 @@ app.include_router(workflow_router)
 
 @app.get("/")
 def read_root():
-    return {"Hello World"}
+    return {"Welcome to a8n backend server"}

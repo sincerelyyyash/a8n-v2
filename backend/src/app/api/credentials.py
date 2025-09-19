@@ -1,7 +1,8 @@
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, 
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+
 from ..core.db.db import async_get_db
 from ..schemas.credential_schema import (
     CredentialAllRead,
@@ -12,12 +13,12 @@ from ..schemas.credential_schema import (
 )
 from ..models.credential_model import Credential
 
-router = APIRouter(prefix="/api/v1/credential")
+router = APIRouter(prefix="/api/v1/credential", tags=["credentials"])
 
 
 @router.post("/create")
 async def add_credentials(
-    credential: CredentialCreate, db: AsyncSession = Depends(async_get_db())
+    credential: CredentialCreate, db: AsyncSession = Depends(async_get_db)
 ):
     try:
         new_cred = Credential(
@@ -77,16 +78,17 @@ async def update_credential(
 
 @router.get("/")
 async def get_credential(
-    credential: CredentialPublicRead, db: AsyncSession = Depends(async_get_db())
+    credential_id: int = Query(...), user_id: int = Query(...), db: AsyncSession = Depends(async_get_db)
 ):
+    """
+    Fetch a single credential by credential_id and user_id (as query params).
+    """
     try:
         result = await db.execute(
             select(Credential).where(
-                (Credential.id == credential.id)
-                & (Credential.user_id == credential.user_id)
+                (Credential.id == credential_id) & (Credential.user_id == user_id)
             )
         )
-
         cred = result.scalar_one_or_none()
 
         if not cred:
@@ -95,8 +97,13 @@ async def get_credential(
             )
 
         return {
-            "message": "Credenial fetched successfully",
-            "data": {"credential": {cred.title, cred.platform, cred.id}},
+            "message": "Credential fetched successfully",
+            "data": {
+                "id": cred.id,
+                "title": cred.title,
+                "platform": cred.platform,
+                "user_id": cred.user_id,
+            },
         }
 
     except Exception as e:
@@ -105,23 +112,22 @@ async def get_credential(
 
 @router.get("/all", response_model=List[CredentialRead])
 async def get_all_credentials(
-    credential: CredentialAllRead, db: AsyncSession = Depends(async_get_db())
+    user_id: int = Query(...), db: AsyncSession = Depends(async_get_db)
 ):
+    """
+    Fetch all credentials for a given user_id.
+    """
     try:
-        results = await db.execute(
-            select(Credential).where(
-                (Credential.user_id == credential.user_id)
-            )
-        )
-
-        credentials = results.scalar.all()
+        results = await db.execute(select(Credential).where(Credential.user_id == user_id))
+        credentials = results.scalars().all()
 
         if not credentials:
             raise HTTPException(
-                status_code=400, detail="Credential not found or does not exist"
+                status_code=400, detail="No credentials found for this user"
             )
 
-        return {"message": "Credentials fetched successfully", "data": {credentials}}
+        return credentials
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error {str(e)}")
+

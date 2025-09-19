@@ -1,19 +1,16 @@
-from app.schemas.workflow_schema import (
-    WorkflowAllRead,
-    WorkflowCreate,
-    WorkflowDelete,
-    WorkflowRead,
-)
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+
+from ..schemas.workflow_schema import (
+    WorkflowCreate,
+)
 from ..models.workflow_model import Workflow
 from ..models.node_model import Node
 from ..models.connection_model import Connection
 from ..core.db.db import async_get_db
 
-
-router = APIRouter(prefix="/api/v1/workflow")
+router = APIRouter(prefix="/api/v1/workflow", tags=["workflows"])
 
 
 @router.post("/create")
@@ -78,59 +75,89 @@ async def create_workflow(
 
 
 @router.get("/")
-async def getWorkflow(
-    workflow: WorkflowRead, db: AsyncSession = Depends(async_get_db())
+async def get_workflow(
+    workflow_id: int = Query(...), user_id: int = Query(...), db: AsyncSession = Depends(async_get_db)
 ):
+    """
+    Fetch a single workflow by workflow_id and user_id (query params).
+    """
     try:
         result = await db.execute(
-            select(Workflow).where((Workflow.id == workflow.id))
-            & (Workflow.user_id == workflow.user_id)
+            select(Workflow).where(
+                (Workflow.id == workflow_id) & (Workflow.user_id == user_id)
+            )
         )
         workflow = result.scalar_one_or_none()
 
         if not workflow:
             raise HTTPException(
-                status_code=500, detail=" Workflow not found or does not exist"
+                status_code=404, detail="Workflow not found or does not exist"
             )
 
-        return {"message": "Workflow fetched successfully", "data": {workflow}}
+        return {
+            "message": "Workflow fetched successfully",
+            "data": {
+                "id": workflow.id,
+                "name": workflow.name,
+                "title": workflow.title,
+                "enabled": workflow.enabled,
+                "user_id": workflow.user_id,
+            },
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error {str(e)}")
 
 
 @router.get("/all")
-async def getAllWorkflow(
-    workflow: WorkflowAllRead, db: AsyncSession = Depends(async_get_db())
+async def get_all_workflows(
+    user_id: int = Query(...), db: AsyncSession = Depends(async_get_db)
 ):
+    """
+    Fetch all workflows for a given user_id.
+    """
     try:
-        result = await db.execute(
-            select(Workflow).where(Workflow.user_id == workflow.user_id)
-        )
-        workflows = result.scalar.all()
+        result = await db.execute(select(Workflow).where(Workflow.user_id == user_id))
+        workflows = result.scalars().all()
 
         if not workflows:
-            raise HTTPException(status_code=400, detail="No workflows found")
+            raise HTTPException(status_code=404, detail="No workflows found")
 
-        return {"message": "Workflows fetched successfully", "data": {workflows}}
+        return {
+            "message": "Workflows fetched successfully",
+            "data": [
+                {
+                    "id": wf.id,
+                    "name": wf.name,
+                    "title": wf.title,
+                    "enabled": wf.enabled,
+                    "user_id": wf.user_id,
+                }
+                for wf in workflows
+            ],
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error {str(e)}")
 
 
 @router.delete("/")
-async def deleteWorkflow(
-    workflow: WorkflowDelete, db: AsyncSession = Depends(async_get_db())
+async def delete_workflow(
+    workflow_id: int = Query(...), user_id: int = Query(...), db: AsyncSession = Depends(async_get_db)
 ):
+    """
+    Delete a workflow by workflow_id and user_id.
+    """
     try:
         result = await db.execute(
-            select(Workflow).where((Workflow.id == workflow.id))
-            & (Workflow.user_id == workflow.user_id)
+            select(Workflow).where(
+                (Workflow.id == workflow_id) & (Workflow.user_id == user_id)
+            )
         )
         workflow = result.scalar_one_or_none()
 
         if not workflow:
-            raise HTTPException(status_code=400, detail="Workflow not found")
+            raise HTTPException(status_code=404, detail="Workflow not found")
 
         await db.delete(workflow)
         await db.commit()

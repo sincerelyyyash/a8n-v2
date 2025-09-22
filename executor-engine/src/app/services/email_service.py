@@ -45,7 +45,6 @@ async def check_for_mails(
         if status != "OK":
             print("No new emails found.")
             return []
-
         email_id_list = email_ids[0].split()
         messages = []
 
@@ -70,3 +69,4 @@ async def check_for_mails(
     except Exception as e:
         print(f"Error checking mails: {str(e)}")
         return []
+

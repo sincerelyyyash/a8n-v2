@@ -78,7 +78,9 @@ async def update_credential(
 
 @router.get("/")
 async def get_credential(
-    credential_id: int = Query(...), user_id: int = Query(...), db: AsyncSession = Depends(async_get_db)
+    credential_id: int = Query(...),
+    user_id: int = Query(...),
+    db: AsyncSession = Depends(async_get_db),
 ):
     """
     Fetch a single credential by credential_id and user_id (as query params).
@@ -118,7 +120,9 @@ async def get_all_credentials(
     Fetch all credentials for a given user_id.
     """
     try:
-        results = await db.execute(select(Credential).where(Credential.user_id == user_id))
+        results = await db.execute(
+            select(Credential).where(Credential.user_id == user_id)
+        )
         credentials = results.scalars().all()
 
         if not credentials:
@@ -130,4 +134,3 @@ async def get_all_credentials(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error {str(e)}")
-

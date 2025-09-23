@@ -3,6 +3,7 @@ from email.message import EmailMessage
 import os
 import imaplib
 import email
+import asyncio
 
 SMTP_PORT = int(os.getenv("SMTP_PORT", 465))
 
@@ -70,3 +71,39 @@ async def check_for_mails(
         print(f"Error checking mails: {str(e)}")
         return []
 
+
+async def send_email_and_wait_for_reply(
+    sender_email: str,
+    sender_password: str,
+    receiver_email: str,
+    subject: str,
+    msg: str,
+    smtp_server: str,
+    imap_server: str,
+    wait_timeout_seconds: int = 300,
+    poll_interval_seconds: int = 10,
+):
+    await send_email(
+        sender_email=sender_email,
+        sender_password=sender_password,
+        receiver_email=receiver_email,
+        subject=subject,
+        msg=msg,
+        smtp_server=smtp_server,
+    )
+
+    start = asyncio.get_event_loop().time()
+    while True:
+        if asyncio.get_event_loop().time() - start > wait_timeout_seconds:
+            return {"status": "timeout", "messages": []}
+
+        messages = await check_for_mails(
+            receiver_email=sender_email,
+            receiver_email_password=sender_password,
+            imap_server=imap_server,
+        )
+
+        if messages:
+            return {"status": "received", "messages": messages}
+
+        await asyncio.sleep(poll_interval_seconds)

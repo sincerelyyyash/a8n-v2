@@ -1,24 +1,24 @@
 import asyncio
 import os
-import aioredis
 import json
 import uuid
 from typing import Dict, Any
+from redis.asyncio import Redis
 
 
 async def redisClient(key: str, value: str):
     redis_url = os.getenv("REDIS_URL", "redis://localhost")
-    redis = await aioredis.from_url(redis_url)
-
-    await redis.set(key, value)
-
-    await redis.close()
+    redis: Redis = Redis.from_url(redis_url)
+    try:
+        await redis.set(key, value)
+    finally:
+        await redis.close()
 
 
 async def add_to_execution_queue(execution_data: Dict[str, Any]) -> str:
 
     redis_url = os.getenv("REDIS_URL", "redis://localhost")
-    redis = await aioredis.from_url(redis_url)
+    redis: Redis = Redis.from_url(redis_url)
     
 
     execution_id = str(uuid.uuid4())
@@ -41,7 +41,7 @@ async def add_to_execution_queue(execution_data: Dict[str, Any]) -> str:
 async def get_execution_status(execution_id: str) -> Dict[str, Any]:
 
     redis_url = os.getenv("REDIS_URL", "redis://localhost")
-    redis = await aioredis.from_url(redis_url)
+    redis: Redis = Redis.from_url(redis_url)
     
     status_key = f"execution_status:{execution_id}"
     status_data = await redis.get(status_key)

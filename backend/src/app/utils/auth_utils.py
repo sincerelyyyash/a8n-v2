@@ -2,6 +2,10 @@ import bcrypt
 import jwt
 from datetime import datetime, timedelta
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from a .env file if present
+load_dotenv()
 
 JWT_SECRET = os.getenv("JWT_SECRET")
 if not JWT_SECRET:

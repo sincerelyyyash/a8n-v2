@@ -40,8 +40,8 @@ async def get_user_credentials(user_id: int, db: AsyncSession) -> dict:
 @router.post("/workflow", response_model=ExecutionResponse)
 async def execute_workflow(
     data: WorkflowExecutionCreate, 
+    request: Request,
     db: AsyncSession = Depends(async_get_db),
-    request: Request | None = None,
 ):
 
     try:
@@ -130,8 +130,8 @@ async def execute_workflow(
 @router.post("/node", response_model=ExecutionResponse)
 async def execute_node(
     data: NodeExecutionCreate, 
+    request: Request,
     db: AsyncSession = Depends(async_get_db),
-    request: Request | None = None,
 ):
     """
     Execute single node by sending execution data to Redis queue
@@ -262,12 +262,12 @@ async def update_execution_status_endpoint(
 
 @router.get("/list")
 async def list_executions(
+    request: Request,
     user_id: int | None = Query(None),
     workflow_id: Optional[int] = Query(None),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(async_get_db),
-    request: Request = None,
 ):
     try:
         authed_user_id = getattr(request.state, "user_id", user_id)

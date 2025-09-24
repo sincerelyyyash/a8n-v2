@@ -1,4 +1,5 @@
 from typing import Callable
+import os
 from starlette.requests import Request
 from starlette.responses import Response, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -24,6 +25,17 @@ class AuthValidationMiddleware(BaseHTTPMiddleware):
 
         if any(path.startswith(prefix) for prefix in EXEMPT_PATH_PREFIXES):
             return await call_next(request)
+
+        # Allow engine status updates via shared secret without user cookies
+        if path == "/api/v1/execution/status/update":
+            expected_secret = os.getenv("ENGINE_STATUS_SECRET")
+            provided_secret = request.headers.get("X-Engine-Secret")
+            if expected_secret and provided_secret == expected_secret:
+                return await call_next(request)
+            # If secret is configured and missing/mismatch, block explicitly
+            if expected_secret:
+                return JSONResponse({"detail": "Unauthorized status update"}, status_code=401)
+            # If no secret configured, fall through to normal auth checks
 
         token = request.cookies.get("token")
         user_id_cookie = request.cookies.get("user_id")

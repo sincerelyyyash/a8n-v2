@@ -24,8 +24,8 @@ class Execution(Base):
     node_id: Mapped[int] = mapped_column(Integer, nullable=True)
 
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
-    result: Mapped[dict] = mapped_column(JSON, nullable=True)
-    error: Mapped[dict] = mapped_column(JSON, nullable=True)
+    result: Mapped[dict] = mapped_column(JSON, nullable=True, default=None)
+    error: Mapped[dict] = mapped_column(JSON, nullable=True, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(

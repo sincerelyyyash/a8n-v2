@@ -7,7 +7,6 @@ import { CreateFirstNode } from './nodes/FirstNode';
 import { MediaTitleNode } from './nodes/MediaTitleNode';
 import ActionToolbar from './ActionToolbar';
 import { Minus, Plus, Maximize2 } from 'lucide-react';
-import { useSidebar } from "@/components/ui/sidebar";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -110,7 +109,7 @@ export default function ReactFlowComponent() {
     const loadCreds = async () => {
       if (!user?.id) return;
       try {
-        const res = await apiClient.get('/api/v1/credential/all', { params: { user_id: user.id } });
+        const res = await apiClient.get('/api/v1/credential/all');
         const arr = Array.isArray(res.data) ? res.data : [];
         setCredentials(arr.map((c: any) => ({ id: c.id, title: c.title, platform: c.platform })));
       } catch {}
@@ -620,7 +619,7 @@ export default function ReactFlowComponent() {
                     setCreatingCred(true);
                     const parsed = credData ? JSON.parse(credData) : {};
                     await apiClient.post('/api/v1/credential/create', {
-                      user_id: user.id,
+                      
                       title: credTitle.trim(),
                       platform: credPlatform.trim(),
                       data: parsed,
@@ -629,7 +628,7 @@ export default function ReactFlowComponent() {
                     setCredDialogOpen(false);
                     setCredTitle(''); setCredPlatform(''); setCredData('');
                     // refresh
-                    const res = await apiClient.get('/api/v1/credential/all', { params: { user_id: user.id } });
+                    const res = await apiClient.get('/api/v1/credential/all');
                     const arr = Array.isArray(res.data) ? res.data : [];
                     setCredentials(arr.map((c: any) => ({ id: c.id, title: c.title, platform: c.platform })));
                   } catch (e: any) {
@@ -682,7 +681,7 @@ export default function ReactFlowComponent() {
                       name: saveName.trim(),
                       title: saveTitle.trim(),
                       enabled: saveEnabled,
-                      user_id: user.id,
+                      
                       nodes: nodes.filter((n) => n.id !== 'first-node').map((n: any) => ({
                         positionX: n.position?.x ?? 0,
                         positionY: n.position?.y ?? 0,

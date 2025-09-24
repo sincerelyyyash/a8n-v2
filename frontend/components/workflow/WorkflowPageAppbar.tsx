@@ -16,7 +16,10 @@ export default function WorkflowPageAppbar() {
         {/* <div className="text-xs text-sidebar-foreground/70">What triggers this workflow?</div> */}
       </div>
       <div className="flex items-center gap-1 sm:gap-2">
-        <button className="text-[10px] sm:text-xs px-2 py-1 sm:px-3 sm:py-1.5 rounded-md border border-sidebar-border text-sidebar-foreground/80 hover:text-sidebar-foreground hover:border-sidebar-foreground/60 transition-colors">
+        <button className="text-[10px] sm:text-xs px-2 py-1 sm:px-3 sm:py-1.5 rounded-md border border-sidebar-border text-sidebar-foreground/80 hover:text-sidebar-foreground hover:border-sidebar-foreground/60 transition-colors" onClick={() => {
+          const ev = new CustomEvent("open-save-workflow-dialog");
+          window.dispatchEvent(ev);
+        }}>
           Save
         </button>
       </div>

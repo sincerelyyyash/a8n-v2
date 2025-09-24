@@ -5,6 +5,9 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { apiClient, type ApiResponse } from "@/lib/axios";
+import { toast } from "sonner";
+import { useAuth } from "@/components/providers/auth-provider";
 
 type Workflow = {
   id: number;
@@ -21,7 +24,7 @@ type Execution = {
   runTimeMs: number;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+// base URL is handled by apiClient
 
 const StatCard = ({ label, value, helper }: { label: string; value: string; helper?: string }) => (
   <div className="flex flex-col gap-1 rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm" role="group" aria-label={label}>
@@ -52,6 +55,7 @@ const WorkflowRow = ({ workflow }: { workflow: Workflow }) => (
 );
 
 export default function WorkflowHome() {
+  const { user } = useAuth();
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>("");
@@ -60,47 +64,37 @@ export default function WorkflowHome() {
   const [credentialDialogOpen, setCredentialDialogOpen] = useState<boolean>(false);
   const [credentialQuery, setCredentialQuery] = useState<string>("");
   const [executions] = useState<Execution[]>([]);
+  const [creating, setCreating] = useState<boolean>(false);
+  const [createOpen, setCreateOpen] = useState<boolean>(false);
+  const [createName, setCreateName] = useState<string>("");
+  const [createTitle, setCreateTitle] = useState<string>("");
+  const [createEnabled, setCreateEnabled] = useState<boolean>(true);
+  const [credentials, setCredentials] = useState<Array<{ id: number; title: string; platform: string }>>([]);
+  const [credentialsLoading, setCredentialsLoading] = useState<boolean>(false);
 
   useEffect(() => {
     const fetchWorkflows = async () => {
       try {
         setLoading(true);
         setError("");
-        // Determine base URL: env override, otherwise try current host with common server port fallback
-        const base = (() => {
-          if (API_BASE_URL) return API_BASE_URL.replace(/\/$/, "");
-          if (typeof window !== "undefined") {
-            const loc = new URL(window.location.href);
-            const currentPort = loc.port || (loc.protocol === "https:" ? "443" : "80");
-            // Common dev mapping: Next on 3001, API on 8000
-            const guessedPort = currentPort === "3000" || currentPort === "3001" ? "8000" : currentPort;
-            return `${loc.protocol}//${loc.hostname}:${guessedPort}`;
-          }
-          return "";
-        })();
-        const res = await fetch(`${base}/api/v1/workflow/all`, {
-          method: "GET",
-          credentials: "include",
-        });
-        if (!res.ok) {
-          // Gracefully handle auth/empty cases by showing empty state instead of error
+        if (!user?.id) {
           setWorkflows([]);
           return;
         }
-        const json = await res.json();
-        const data: Workflow[] = json?.data ?? [];
+        const res = await apiClient.get<ApiResponse<Workflow[]>>("/api/v1/workflow/all", { params: { user_id: user.id } });
+        const data = (res.data?.data ?? []) as Workflow[];
         setWorkflows(Array.isArray(data) ? data : []);
       } catch (err) {
         // Treat network or unexpected errors as empty state (no noisy UI errors)
         setWorkflows([]);
-        setError("");
+        setError("Failed to load workflows");
       } finally {
         setLoading(false);
       }
     };
 
     void fetchWorkflows();
-  }, []);
+  }, [user?.id]);
 
   const filtered = useMemo(() => {
     if (!query) return workflows;
@@ -185,7 +179,84 @@ export default function WorkflowHome() {
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-lg font-semibold">Overview</h1>
-        <Button aria-label="Create Workflow" className="h-9">Create Workflow</Button>
+        <Dialog.Root open={createOpen} onOpenChange={setCreateOpen}>
+          <Dialog.Trigger asChild>
+            <Button aria-label="Create Workflow" className="h-9">Create Workflow</Button>
+          </Dialog.Trigger>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+            <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-lg">
+              <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                <Dialog.Title className="text-sm font-medium">Create workflow</Dialog.Title>
+                <Dialog.Close asChild>
+                  <button aria-label="Close" className="rounded-md p-1 text-muted-foreground hover:text-foreground">✕</button>
+                </Dialog.Close>
+              </div>
+              <div className="space-y-3 p-4">
+                <div className="grid gap-2">
+                  <label htmlFor="wf-name" className="text-xs text-muted-foreground">Name</label>
+                  <Input id="wf-name" value={createName} onChange={(e) => setCreateName(e.target.value)} placeholder="internal-name" />
+                </div>
+                <div className="grid gap-2">
+                  <label htmlFor="wf-title" className="text-xs text-muted-foreground">Title</label>
+                  <Input id="wf-title" value={createTitle} onChange={(e) => setCreateTitle(e.target.value)} placeholder="My workflow" />
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <button
+                    type="button"
+                    aria-label="Toggle enabled"
+                    className={`h-6 w-10 rounded-full border border-border ${createEnabled ? "bg-primary/80" : "bg-muted"}`}
+                    onClick={() => setCreateEnabled((v) => !v)}
+                  />
+                  <span className="text-muted-foreground">Enabled</span>
+                </div>
+                <div className="pt-2">
+                  <Button
+                    aria-label="Create"
+                    className="w-full"
+                    disabled={creating || !createName.trim() || !createTitle.trim() || !user?.id}
+                    onClick={async () => {
+                      if (!user?.id) {
+                        toast.error("You must be signed in to create a workflow");
+                        return;
+                      }
+                      try {
+                        setCreating(true);
+                        const payload = {
+                          name: createName.trim(),
+                          title: createTitle.trim(),
+                          enabled: createEnabled,
+                          user_id: user.id,
+                          nodes: [],
+                          connections: [],
+                        };
+                        const res = await apiClient.post<ApiResponse<{ workflow_id: number }>>("/api/v1/workflow/create", payload);
+                        const id = (res.data?.data as any)?.workflow_id;
+                        toast.success("Workflow created");
+                        setCreateOpen(false);
+                        setCreateName("");
+                        setCreateTitle("");
+                        setCreateEnabled(true);
+                        try {
+                          const listRes = await apiClient.get<ApiResponse<Workflow[]>>("/api/v1/workflow/all", { params: { user_id: user.id } });
+                          const data = (listRes.data?.data ?? []) as Workflow[];
+                          setWorkflows(Array.isArray(data) ? data : []);
+                        } catch {}
+                      } catch (e: any) {
+                        const msg = e?.response?.data?.detail || e?.message || "Failed to create workflow";
+                        toast.error(String(msg));
+                      } finally {
+                        setCreating(false);
+                      }
+                    }}
+                  >
+                    {creating ? "Creating..." : "Create"}
+                  </Button>
+                </div>
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -270,7 +341,54 @@ export default function WorkflowHome() {
       ) : null}
 
       {activeTab === "credentials" ? (
-        <CredentialsEmptyState />
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium">Credentials</div>
+            <Button
+              aria-label="Refresh credentials"
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (!user?.id) {
+                  toast.error("Sign in to load credentials");
+                  return;
+                }
+                try {
+                  setCredentialsLoading(true);
+                  const res = await apiClient.get("/api/v1/credential/all", { params: { user_id: user.id } });
+                  const arr = Array.isArray(res.data) ? res.data : [];
+                  setCredentials(arr.map((c: any) => ({ id: c.id, title: c.title, platform: c.platform })));
+                  toast.success("Credentials loaded");
+                } catch (e: any) {
+                  const msg = e?.response?.data?.detail || "Failed to load credentials";
+                  toast.error(String(msg));
+                  setCredentials([]);
+                } finally {
+                  setCredentialsLoading(false);
+                }
+              }}
+            >
+              Refresh
+            </Button>
+          </div>
+
+          {credentialsLoading ? (
+            <div className="text-sm text-muted-foreground">Loading credentials…</div>
+          ) : credentials.length === 0 ? (
+            <CredentialsEmptyState />
+          ) : (
+            <div className="flex flex-col gap-2">
+              {credentials.map((c) => (
+                <div key={c.id} className="flex items-center justify-between rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm">
+                  <div className="flex min-w-0 flex-col">
+                    <div className="truncate text-sm font-medium">{c.title}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">{c.platform}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       ) : null}
 
       {activeTab === "executions" ? (
@@ -295,6 +413,7 @@ export default function WorkflowHome() {
                   <div className="mb-3 text-3xl">🧪</div>
                   <h2 className="text-lg font-medium">No executions yet</h2>
                   <p className="mt-1 text-sm text-muted-foreground">Run a workflow to see execution history here</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Listing endpoint not available yet; will appear once backend provides it.</p>
                 </div>
               </div>
             ) : (

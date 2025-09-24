@@ -1,5 +1,5 @@
 import asyncio
-from .services.redis_service import process_execution_queue
+from services.redis_service import process_execution_queue
 
 
 async def main():
@@ -7,9 +7,13 @@ async def main():
     await task
 
 
-if __name__ == "__main__":
+def cli():
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+
+
+if __name__ == "__main__":
+    cli()
 

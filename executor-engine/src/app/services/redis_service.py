@@ -1,17 +1,20 @@
 import asyncio
-import aioredis
+import os
 import json
 from typing import Dict, Any, Optional
 import httpx
+from redis.asyncio import Redis
 
 async def redisClient(key: str):
-    redis = await aioredis.from_url("redis://localhost")
+    redis_url = os.getenv("REDIS_URL", "redis://localhost")
+    redis: Redis = Redis.from_url(redis_url)
     value = await redis.get(key)
     print(f"Retrieved value: {value.decode('utf-8')}")
     await redis.close()
 
 async def get_execution_from_queue() -> Optional[Dict[str, Any]]:
-    redis = await aioredis.from_url("redis://localhost")
+    redis_url = os.getenv("REDIS_URL", "redis://localhost")
+    redis: Redis = Redis.from_url(redis_url)
     try:
         execution_id = await redis.brpop("execution_queue", timeout=1)
         if not execution_id:
@@ -31,7 +34,8 @@ async def get_execution_from_queue() -> Optional[Dict[str, Any]]:
         await redis.close()
 
 async def update_execution_status(execution_id: str, status: str, result: Dict[str, Any] = None):
-    redis = await aioredis.from_url("redis://localhost")
+    redis_url = os.getenv("REDIS_URL", "redis://localhost")
+    redis: Redis = Redis.from_url(redis_url)
     try:
         status_data = {
             "execution_id": execution_id,
@@ -67,9 +71,14 @@ async def process_execution_queue():
                     await post_status_update_backend(execution_id, "completed", result=result)
                     print(f"Execution {execution_id} completed successfully")
                 except Exception as e:
-                    await update_execution_status(execution_id, "failed", {"error": str(e)})
-                    await post_status_update_backend(execution_id, "failed", error={"error": str(e)})
-                    print(f"Execution {execution_id} failed: {e}")
+                    retry_count = int(execution_data.get("retry_count", 0))
+                    if retry_count < 3:
+                        print(f"Execution {execution_id} failed (attempt {retry_count+1}). Retrying...")
+                        await requeue_execution_with_retry(execution_data, retry_count + 1)
+                    else:
+                        await update_execution_status(execution_id, "failed", {"error": str(e)})
+                        await post_status_update_backend(execution_id, "failed", error={"error": str(e)})
+                        print(f"Execution {execution_id} permanently failed after retries: {e}")
             else:
                 await asyncio.sleep(1)
         except Exception as e:
@@ -92,24 +101,20 @@ async def process_workflow_execution(execution_data: Dict[str, Any]) -> Dict[str
         adjacency.setdefault(from_id, []).append(to_id)
         in_degree[to_id] = in_degree.get(to_id, 0) + 1
 
-    roots = [nid for nid, deg in in_degree.items() if deg == 0]
-
-    context: Dict[str, Any] = {"results": {}, "trigger": execution_data.get("trigger")}
+    ready = [nid for nid, deg in in_degree.items() if deg == 0]
     execution_order: list[int] = []
+    context: Dict[str, Any] = {"results": {}, "trigger": execution_data.get("trigger")}
 
-    visited: set[int] = set()
-
-    async def dfs(node_id: int):
-        if node_id in visited:
-            return
-        visited.add(node_id)
+    while ready:
+        node_id = ready.pop(0)
         execution_order.append(node_id)
-        children = adjacency.get(node_id, [])
-        for child in children:
-            await dfs(child)
+        for child in adjacency.get(node_id, []):
+            in_degree[child] = in_degree.get(child, 0) - 1
+            if in_degree[child] == 0:
+                ready.append(child)
 
-    for r in roots:
-        await dfs(r)
+    if len(execution_order) != len(node_map):
+        raise RuntimeError("Workflow graph has cycles or disconnected nodes")
 
     for node_id in execution_order:
         node = node_map.get(node_id)
@@ -214,7 +219,9 @@ async def post_status_update_backend(
     result: Optional[Dict[str, Any]] = None,
     error: Optional[Dict[str, Any]] = None,
 ):
-    url = "http://localhost:8000/api/v1/execution/status/update"
+    backend_base_url = os.getenv("BACKEND_BASE_URL", "http://localhost:8000")
+    engine_secret = os.getenv("ENGINE_STATUS_SECRET", "")
+    url = f"{backend_base_url.rstrip('/')}/api/v1/execution/status/update"
     payload: Dict[str, Any] = {
         "execution_id": execution_id,
         "status": status,
@@ -225,7 +232,22 @@ async def post_status_update_backend(
         payload["error"] = error
 
     try:
+        headers = {"X-Engine-Secret": engine_secret} if engine_secret else {}
         async with httpx.AsyncClient(timeout=10.0) as client:
-            await client.post(url, json=payload)
+            await client.post(url, json=payload, headers=headers)
     except Exception as e:
         print(f"Failed to post status update to backend: {e}")
+
+async def requeue_execution_with_retry(execution_data: Dict[str, Any], retry_count: int) -> None:
+    redis_url = os.getenv("REDIS_URL", "redis://localhost")
+    redis: Redis = Redis.from_url(redis_url)
+    try:
+        execution_data["retry_count"] = retry_count
+        execution_id = execution_data.get("execution_id")
+        queue_key = f"execution_queue:{execution_id}"
+        await redis.set(queue_key, json.dumps(execution_data), ex=3600)
+        await redis.lpush("execution_queue", execution_id)
+    except Exception as e:
+        print(f"Error requeuing execution {execution_data.get('execution_id')}: {e}")
+    finally:
+        await redis.close()

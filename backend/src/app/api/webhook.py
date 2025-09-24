@@ -1,5 +1,8 @@
 from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, Request
+import hmac
+import hashlib
+import time
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +21,7 @@ router = APIRouter(prefix="/api/v1/webhook")
 
 
 async def _get_user_credentials(user_id: int, db: AsyncSession) -> dict:
-    result = await db.execute(select(Credential).where(Credential.userId == user_id))
+    result = await db.execute(select(Credential).where(Credential.user_id == user_id))
     credentials = result.scalars().all()
     out: Dict[str, Any] = {}
     for cred in credentials:
@@ -31,11 +34,12 @@ async def _get_user_credentials(user_id: int, db: AsyncSession) -> dict:
     return out
 
 
-@router.post("/{webhook_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+@router.api_route("/{webhook_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
 async def handle_webhook(webhook_path: str, request: Request, db: AsyncSession = Depends(async_get_db)):
     try:
         method = request.method.upper()
         full_path = "/" + webhook_path if not webhook_path.startswith("/") else webhook_path
+        raw_body = await request.body()
 
         result = await db.execute(
             select(Webhook).where((Webhook.path == full_path) & (Webhook.method == method))
@@ -46,9 +50,23 @@ async def handle_webhook(webhook_path: str, request: Request, db: AsyncSession =
 
         header_key = webhook.header
         if header_key:
-            provided_secret = request.headers.get(header_key)
-            if not provided_secret or provided_secret != webhook.secret:
-                raise HTTPException(status_code=401, detail="Unauthorized webhook")
+            signature = request.headers.get(header_key)
+            timestamp = request.headers.get("X-Timestamp")
+            if not signature or not timestamp:
+                raise HTTPException(status_code=401, detail="Missing signature or timestamp")
+            try:
+                ts_int = int(timestamp)
+            except Exception:
+                raise HTTPException(status_code=401, detail="Invalid timestamp")
+            now = int(time.time())
+            if abs(now - ts_int) > 300:
+                raise HTTPException(status_code=401, detail="Stale timestamp")
+
+            secret = webhook.secret or ""
+            message = f"{method}\n{full_path}\n{timestamp}\n".encode("utf-8") + raw_body
+            computed = hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(computed, signature):
+                raise HTTPException(status_code=401, detail="Invalid signature")
 
         wf_result = await db.execute(select(Workflow).where(Workflow.id == webhook.workflow_id))
         workflow = wf_result.scalar_one_or_none()

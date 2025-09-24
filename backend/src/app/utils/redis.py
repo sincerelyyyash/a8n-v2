@@ -1,4 +1,5 @@
 import asyncio
+import os
 import aioredis
 import json
 import uuid
@@ -6,7 +7,8 @@ from typing import Dict, Any
 
 
 async def redisClient(key: str, value: str):
-    redis = await aioredis.from_url("redis://localhost")
+    redis_url = os.getenv("REDIS_URL", "redis://localhost")
+    redis = await aioredis.from_url(redis_url)
 
     await redis.set(key, value)
 
@@ -15,11 +17,15 @@ async def redisClient(key: str, value: str):
 
 async def add_to_execution_queue(execution_data: Dict[str, Any]) -> str:
 
-    redis = await aioredis.from_url("redis://localhost")
+    redis_url = os.getenv("REDIS_URL", "redis://localhost")
+    redis = await aioredis.from_url(redis_url)
     
 
     execution_id = str(uuid.uuid4())
     execution_data["execution_id"] = execution_id
+
+    if "retry_count" not in execution_data:
+        execution_data["retry_count"] = 0
     
 
     queue_key = f"execution_queue:{execution_id}"
@@ -34,7 +40,8 @@ async def add_to_execution_queue(execution_data: Dict[str, Any]) -> str:
 
 async def get_execution_status(execution_id: str) -> Dict[str, Any]:
 
-    redis = await aioredis.from_url("redis://localhost")
+    redis_url = os.getenv("REDIS_URL", "redis://localhost")
+    redis = await aioredis.from_url(redis_url)
     
     status_key = f"execution_status:{execution_id}"
     status_data = await redis.get(status_key)
@@ -43,5 +50,26 @@ async def get_execution_status(execution_id: str) -> Dict[str, Any]:
     
     if status_data:
         return json.loads(status_data)
-    return {"status": "not_found"}
+
+    # Fallback to DB if not in Redis
+    try:
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from ..core.db.db import async_get_db
+        from ..models.execution_model import Execution
+        async def _fetch():
+            async for db in async_get_db():
+                result = await db.execute(select(Execution).where(Execution.execution_id == execution_id))
+                e = result.scalar_one_or_none()
+                if e:
+                    return {
+                        "execution_id": execution_id,
+                        "status": e.status,
+                        "result": e.result,
+                        "error": e.error,
+                    }
+                return {"status": "not_found"}
+        return await _fetch()
+    except Exception:
+        return {"status": "not_found"}
 

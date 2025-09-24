@@ -18,19 +18,16 @@ class ExecutionType(str, Enum):
 
 
 class ExecutionBase(BaseModel):
-    user_id: Annotated[int, Field(gt=0)]
     workflow_id: Annotated[int, Field(gt=0)]
     execution_type: ExecutionType
 
 
 class WorkflowExecutionCreate(BaseModel):
-    user_id: Annotated[int, Field(gt=0)]
     workflow_id: Annotated[int, Field(gt=0)]
     execution_type: ExecutionType = ExecutionType.WORKFLOW
 
 
 class NodeExecutionCreate(BaseModel):
-    user_id: Annotated[int, Field(gt=0)]
     workflow_id: Annotated[int, Field(gt=0)]
     node_id: Annotated[int, Field(gt=0)]
     execution_type: ExecutionType = ExecutionType.NODE
@@ -61,6 +58,5 @@ class ExecutionStatusUpdate(BaseModel):
 
 
 class ExecuteNode(BaseModel):
-    user_id: Annotated[int, Field(gt=0)]
     workflow_id: Annotated[int, Field(gt=0)]
     node_id: Annotated[int, Field(gt=0)]

@@ -1,7 +1,7 @@
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Header
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, desc
 from ..core.db.db import async_get_db
 from ..models.workflow_model import Workflow
 from ..models.node_model import Node
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/v1/execution")
 
 
 async def get_user_credentials(user_id: int, db: AsyncSession) -> dict:
-    credentials_query = select(Credential).where(Credential.userId == user_id)
+    credentials_query = select(Credential).where(Credential.user_id == user_id)
     result = await db.execute(credentials_query)
     credentials = result.scalars().all()
     
@@ -40,14 +40,19 @@ async def get_user_credentials(user_id: int, db: AsyncSession) -> dict:
 @router.post("/workflow", response_model=ExecutionResponse)
 async def execute_workflow(
     data: WorkflowExecutionCreate, 
-    db: AsyncSession = Depends(async_get_db)
+    db: AsyncSession = Depends(async_get_db),
+    request: Request | None = None,
 ):
 
     try:
 
+        authed_user_id = getattr(request.state, "user_id", None)
+        if authed_user_id is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+
         workflow_query = select(Workflow).where(
             Workflow.id == data.workflow_id,
-            Workflow.user_id == data.user_id
+            Workflow.user_id == authed_user_id,
         )
         result = await db.execute(workflow_query)
         workflow = result.scalar_one_or_none()
@@ -63,7 +68,7 @@ async def execute_workflow(
         nodes_result = await db.execute(nodes_query)
         nodes = nodes_result.scalars().all()
         
-        user_credentials = await get_user_credentials(data.user_id, db)
+        user_credentials = await get_user_credentials(authed_user_id, db)
         
         connections_query = select(Connection).where(
             Connection.workflow_id == data.workflow_id
@@ -72,7 +77,7 @@ async def execute_workflow(
         connections = connections_result.scalars().all()
         
         execution_data = {
-            "user_id": data.user_id,
+            "user_id": authed_user_id,
             "workflow_id": data.workflow_id,
             "execution_type": data.execution_type,
             "workflow_name": workflow.name,
@@ -100,7 +105,7 @@ async def execute_workflow(
             db.add(
                 Execution(
                     execution_id=execution_id,
-                    user_id=data.user_id,
+                    user_id=authed_user_id,
                     workflow_id=data.workflow_id,
                     node_id=None,
                     status=ExecutionStatus.QUEUED.value,
@@ -125,16 +130,21 @@ async def execute_workflow(
 @router.post("/node", response_model=ExecutionResponse)
 async def execute_node(
     data: NodeExecutionCreate, 
-    db: AsyncSession = Depends(async_get_db)
+    db: AsyncSession = Depends(async_get_db),
+    request: Request | None = None,
 ):
     """
     Execute single node by sending execution data to Redis queue
     """
     try:
 
+        authed_user_id = getattr(request.state, "user_id", None)
+        if authed_user_id is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+
         workflow_query = select(Workflow).where(
             Workflow.id == data.workflow_id,
-            Workflow.user_id == data.user_id
+            Workflow.user_id == authed_user_id
         )
         result = await db.execute(workflow_query)
         workflow = result.scalar_one_or_none()
@@ -159,10 +169,10 @@ async def execute_node(
                 detail="Node not found or does not belong to workflow"
             )
         
-        user_credentials = await get_user_credentials(data.user_id, db)
+        user_credentials = await get_user_credentials(authed_user_id, db)
         
         execution_data = {
-            "user_id": data.user_id,
+            "user_id": authed_user_id,
             "workflow_id": data.workflow_id,
             "node_id": data.node_id,
             "execution_type": data.execution_type,
@@ -184,7 +194,7 @@ async def execute_node(
             db.add(
                 Execution(
                     execution_id=execution_id,
-                    user_id=data.user_id,
+                    user_id=authed_user_id,
                     workflow_id=data.workflow_id,
                     node_id=data.node_id,
                     status=ExecutionStatus.QUEUED.value,
@@ -221,9 +231,15 @@ async def get_execution_status_endpoint(execution_id: str):
 
 @router.post("/status/update")
 async def update_execution_status_endpoint(
-    data: ExecutionStatusUpdate, db: AsyncSession = Depends(async_get_db)
+    data: ExecutionStatusUpdate,
+    db: AsyncSession = Depends(async_get_db),
+    x_engine_secret: str | None = Header(default=None, alias="X-Engine-Secret"),
 ):
     try:
+        expected = __import__('os').getenv("ENGINE_STATUS_SECRET", None)
+        if expected and x_engine_secret != expected:
+            raise HTTPException(status_code=401, detail="Unauthorized status update")
+
         result = await db.execute(
             select(Execution).where(Execution.execution_id == data.execution_id)
         )
@@ -238,6 +254,49 @@ async def update_execution_status_endpoint(
             if data.error is not None:
                 execution.error = data.error
         return {"message": "Status updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/list")
+async def list_executions(
+    user_id: int | None = Query(None),
+    workflow_id: Optional[int] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(async_get_db),
+    request: Request = None,
+):
+    try:
+        authed_user_id = getattr(request.state, "user_id", user_id)
+        if authed_user_id is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+
+        query = select(Execution).where(Execution.user_id == authed_user_id)
+        if workflow_id is not None:
+            query = query.where(Execution.workflow_id == workflow_id)
+        query = query.order_by(desc(Execution.created_at)).offset(offset).limit(limit)
+
+        result = await db.execute(query)
+        executions = result.scalars().all()
+
+        return {
+            "message": "Executions fetched successfully",
+            "data": [
+                {
+                    "execution_id": e.execution_id,
+                    "status": e.status,
+                    "user_id": e.user_id,
+                    "workflow_id": e.workflow_id,
+                    "node_id": e.node_id,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                    "updated_at": e.updated_at.isoformat() if e.updated_at else None,
+                }
+                for e in executions
+            ],
+        }
     except HTTPException:
         raise
     except Exception as e:

@@ -17,9 +17,9 @@ class Credential(Base):
         init=False,
     )
 
-    userId: Mapped[int] = mapped_column(Integer, ForeignKey("user.id"))
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("user.id"))
 
-    user = relationship("User", back_populates="credential")
+    user = relationship("User", back_populates="credentials")
 
     title: Mapped[str] = mapped_column(String(20))
     platform: Mapped[str] = mapped_column(String(20))

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Cookie
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -33,7 +33,13 @@ async def register_user(
         await db.refresh(new_user)
 
         token = create_jwt(new_user.id)
-        response.set_cookie(key="token", value=token, httponly=True)
+        cookie_kwargs = {
+            "httponly": True,
+            "secure": bool(int(__import__('os').getenv("COOKIE_SECURE", "0"))),
+            "samesite": __import__('os').getenv("COOKIE_SAMESITE", "Lax"),
+        }
+        response.set_cookie(key="token", value=token, **cookie_kwargs)
+        response.set_cookie(key="user_id", value=str(new_user.id), **cookie_kwargs)
 
         return {
             "message": "User created successfully",
@@ -57,16 +63,22 @@ async def login_user(
             raise HTTPException(status_code=400, detail="Invalid credentials")
 
         token = create_jwt(db_user.id)
-        response.set_cookie(key="token", value=token, httponly=True)
+        cookie_kwargs = {
+            "httponly": True,
+            "secure": bool(int(__import__('os').getenv("COOKIE_SECURE", "0"))),
+            "samesite": __import__('os').getenv("COOKIE_SAMESITE", "Lax"),
+        }
+        response.set_cookie(key="token", value=token, **cookie_kwargs)
+        response.set_cookie(key="user_id", value=str(db_user.id), **cookie_kwargs)
 
-        return {"message": "user logged in successfully", "data": token}
+        return {"message": "user logged in successfully", "data": {"user": db_user.id, "token": token}}
 
     except Exception:
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/")
-async def get_user(token: str | None = None, db: AsyncSession = Depends(async_get_db)):
+async def get_user(token: str | None = Cookie(default=None), db: AsyncSession = Depends(async_get_db)):
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 

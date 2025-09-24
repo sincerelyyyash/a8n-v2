@@ -4,7 +4,6 @@ from pydantic import BaseModel, Field
 
 
 class CredentialBase(BaseModel):
-    user_id: Annotated[int, Field(min_length=2, max_length=20)]
     title: Annotated[str, Field(min_length=2, max_length=20)]
     platform: Annotated[str, Field(min_length=2, max_length=20)]
     data: Annotated[Dict, Field(...)]
@@ -28,12 +27,10 @@ class CredentialRead(BaseModel):
 
 class CredentialUpdate(CredentialBase):
     id: Annotated[int, Field(...)]
-    user_id: Annotated[int, Field(...)]
     data: Annotated[Dict, Field(...)]
 
 
 class CredentialCreate(CredentialBase):
-    user_id: Annotated[int, Field(...)]
     title: Annotated[str, Field(min_length=2, max_length=20)]
     platform: Annotated[str, Field(min_length=2, max_length=20)]
     data: Annotated[Dict, Field(...)]

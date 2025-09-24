@@ -20,8 +20,8 @@ class User(Base):
     first_name: Mapped[str] = mapped_column(String(16))
     last_name: Mapped[str] = mapped_column(String(16))
 
-    email: Mapped[str] = mapped_column(String(25))
-    password: Mapped[str] = mapped_column(String(18))
+    email: Mapped[str] = mapped_column(String(254))
+    password: Mapped[str] = mapped_column(String(128))
 
-    workflows = relationship("Workflows", back_populates="user")
-    credentials = relationship("Credentials", back_populates="user")
+    workflows = relationship("Workflow", back_populates="user")
+    credentials = relationship("Credential", back_populates="user")

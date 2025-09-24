@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 import os
 
 JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET is not set. Configure environment variable JWT_SECRET.")
 JWT_ALGO = "HS256"
 
 
@@ -23,7 +25,7 @@ def create_jwt(user_id: int) -> str:
 
 def decode_jwt(token: str):
     try:
-        return jwt.decode(token, JWT_SECRET, algorithm=[JWT_ALGO])
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
     except jwt.ExpiredSignatureError:
         return None
     except jwt.InvalidTokenError:

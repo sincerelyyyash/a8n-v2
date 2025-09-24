@@ -18,7 +18,6 @@ class WorkflowBase(BaseModel):
     name: Annotated[str, Field(min_length=2, max_length=30)]
     title: Annotated[str, Field(min_length=2, max_length=30)]
     enabled: bool = False
-    user_id: int
 
 
 class WorkflowCreate(WorkflowBase):
@@ -33,7 +32,6 @@ class WorkflowUpdate(BaseModel):
     name: Optional[str] = None
     title: Optional[str] = None
     enabled: Optional[bool] = None
-    user_id: Optional[int] = None
     nodes: Optional[List[NodeCreate]] = None
     connections: Optional[List[ConnectionCreate]] = None
 

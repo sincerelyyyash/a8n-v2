@@ -1,7 +1,7 @@
 "use client"
 import * as React from 'react';
 import { useState, useCallback, useMemo } from 'react';
-import { ReactFlow, applyNodeChanges, applyEdgeChanges, addEdge, useReactFlow, Edge, type NodeTypes, type NodeProps, type Node } from '@xyflow/react';
+import { ReactFlow, ReactFlowProvider, applyNodeChanges, applyEdgeChanges, addEdge, useReactFlow, Edge, type NodeTypes, type NodeProps, type Node } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { CreateFirstNode } from './nodes/FirstNode';
 import { MediaTitleNode } from './nodes/MediaTitleNode';
@@ -57,20 +57,22 @@ const JsonCodeField = ({ value, onChange, placeholder }: { value: unknown; onCha
   );
 };
 
-const initialNodes: Node[] = [
-  {
-    id: 'first-node',
-    type: 'firstNode',
-    position: { x: 0, y: 0 },
-    data: { label: 'Add First Step' },
-  },
-];
-
+const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
 
-export default function ReactFlowComponent() {
+export default function ReactFlowComponent({ workflowId }: { workflowId?: number }) {
   const { user } = useAuth();
-  const [nodes, setNodes] = useState<Node[]>(initialNodes as Node[]);
+  
+  // Start with the first node always present
+  const [nodes, setNodes] = useState<Node[]>([
+    {
+      id: 'first-node',
+      type: 'firstNode',
+      position: { x: 100, y: 100 },
+      data: { label: 'Add First Step' },
+    }
+  ]);
+  
   const [edges, setEdges] = useState(initialEdges);
   const [toolbarOpen, setToolbarOpen] = useState(false);
   const [toolbarMode, setToolbarMode] = useState<"trigger" | "service">("trigger");
@@ -98,12 +100,65 @@ export default function ReactFlowComponent() {
   const [varSelect, setVarSelect] = useState<Record<string, string>>({});
   const [varPanelOpen, setVarPanelOpen] = useState<Record<string, boolean>>({});
 
+  const handleQuickSave = React.useCallback(async () => {
+    if (!user?.id) { toast.error('Sign in required'); return; }
+    if (!workflowId) { setSaveDialogOpen(true); return; }
+    try {
+      setSaving(true);
+      // Build nodes with deterministic temp_ids and a map from react-id -> temp_id
+      const userNodes = nodes.filter((n) => n.id !== 'first-node') as any[];
+      const idToTemp: Record<string, number> = {};
+      const outNodes = userNodes.map((n, idx) => {
+        const tempId = idx + 1;
+        idToTemp[String(n.id)] = tempId;
+        return {
+          positionX: n.position?.x ?? 0,
+          positionY: n.position?.y ?? 0,
+          data: { ...(n.data ?? {}), temp_id: tempId },
+        };
+      });
+
+      // Build connections using temp_ids; skip edges that touch unknown nodes or the first node
+      const outConns = edges
+        .map((e: any) => {
+          const src = String((e as any).source);
+          const dst = String((e as any).target);
+          if (src === 'first-node' || dst === 'first-node') return null;
+          const fromTemp = idToTemp[src];
+          const toTemp = idToTemp[dst];
+          if (!fromTemp || !toTemp) return null;
+          return { from_node_id: fromTemp, to_node_id: toTemp };
+        })
+        .filter(Boolean) as Array<{ from_node_id: number; to_node_id: number }>;
+
+      const payload: any = {
+        id: workflowId,
+        nodes: outNodes,
+        connections: outConns,
+      };
+      console.log('Sending update payload:', payload);
+      await apiClient.post('/api/v1/workflow/update', payload, { params: { user_id: user.id } });
+      toast.success('Workflow saved');
+    } catch (e: any) {
+      const msg = e?.response?.data?.detail || e?.message || 'Failed to save workflow';
+      toast.error(String(msg));
+    } finally {
+      setSaving(false);
+    }
+  }, [workflowId, user?.id, nodes, edges]);
+
   // Listen for Save button event from appbar
   React.useEffect(() => {
-    const handler = () => setSaveDialogOpen(true);
+    const handler = () => {
+      if (workflowId) {
+        void handleQuickSave();
+      } else {
+        setSaveDialogOpen(true);
+      }
+    };
     window.addEventListener("open-save-workflow-dialog", handler);
     return () => window.removeEventListener("open-save-workflow-dialog", handler);
-  }, []);
+  }, [workflowId, handleQuickSave]);
 
   React.useEffect(() => {
     const loadCreds = async () => {
@@ -116,6 +171,70 @@ export default function ReactFlowComponent() {
     };
     void loadCreds();
   }, [user?.id]);
+
+  // Load existing workflow data when workflowId is provided
+  React.useEffect(() => {
+    const loadWorkflow = async () => {
+      if (!workflowId || !user?.id) return;
+      try {
+        const res = await apiClient.get(`/api/v1/workflow/?workflow_id=${workflowId}&include_nodes=true`);
+        const data = res.data?.data;
+        console.log('Loaded workflow data:', data);
+        if (data) {
+          // Convert backend nodes to ReactFlow format
+          const loadedNodes: Node[] = data.nodes?.map((node: any) => ({
+            id: String(node.id),
+            type: 'mediaTitle',
+            position: { x: node.positionX, y: node.positionY },
+            data: {
+              ...node.data,
+              title: node.data?.title || 'Untitled',
+              imageSrc: node.data?.imageSrc,
+              onClick: () => {
+                setConfigDialog({ open: true, nodeId: String(node.id), schemaKey: node.data?.service?.key });
+                setConfigForm(node.data?.service?.data || {});
+                setConfigTitle(node.data?.title || '');
+              },
+              onDelete: () => {
+                setNodes((prev) => prev.filter((n) => n.id !== String(node.id)));
+                setEdges((prev) => prev.filter((e) => e.source !== String(node.id) && e.target !== String(node.id)));
+              },
+              onAddNext: () => { setToolbarMode('service'); setToolbarOpen(true); setPendingEdgeFrom(String(node.id)); },
+              service: node.data?.service,
+            },
+          })) || [];
+
+          // Convert backend connections to ReactFlow edges
+          const loadedEdges: Edge[] = data.connections?.map((conn: any) => ({
+            id: `e-${conn.from_node_id}-${conn.to_node_id}`,
+            source: String(conn.from_node_id),
+            target: String(conn.to_node_id),
+          })) || [];
+
+          // Only show "Add First Step" if no existing nodes are present
+          if (loadedNodes.length === 0) {
+            const firstNode: Node = {
+              id: 'first-node',
+              type: 'firstNode',
+              position: { x: 100, y: 100 },
+              data: { 
+                label: 'Add First Step',
+                onClick: () => setToolbarOpen(true)
+              },
+            };
+            setNodes([firstNode]);
+          } else {
+            setNodes(loadedNodes);
+          }
+          setEdges(loadedEdges);
+        }
+      } catch (e: any) {
+        console.error('Failed to load workflow:', e);
+        toast.error('Failed to load workflow data');
+      }
+    };
+    void loadWorkflow();
+  }, [workflowId, user?.id]);
 
   const SERVICE_FORMS: Record<string, { title: string; fields: Array<{ key: string; label: string; type: "text" | "textarea" | "boolean" | "json" }> }> = {
     ai_model: {
@@ -189,9 +308,32 @@ export default function ReactFlowComponent() {
   }, []);
 
   const onInit = useCallback((instance: any) => {
-    // Center the coordinate (0,0) in the viewport
-    instance.setCenter(0, 0, { zoom: 1, duration: 300 });
+    try {
+      instance.fitView({ padding: 0.2, duration: 200 });
+      // Set a more reasonable default zoom level
+      instance.zoomTo(0.7, { duration: 200 });
+    } catch {}
   }, []);
+
+  // Component to handle view fitting when nodes change
+  const ViewFitter = () => {
+    const rf = useReactFlow();
+    React.useEffect(() => {
+      try {
+        if (nodes.length > 0) {
+          rf.fitView({ padding: 0.2, duration: 200 });
+          // Set a more reasonable zoom level after fitting
+          setTimeout(() => {
+            try {
+              rf.zoomTo(0.7, { duration: 200 });
+            } catch {}
+          }, 250);
+        }
+      } catch {}
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [nodes.length]);
+    return null;
+  };
 
   const FloatingControls = () => {
     const { zoomIn, zoomOut, fitView } = useReactFlow();
@@ -227,32 +369,16 @@ export default function ReactFlowComponent() {
     );
   };
 
-  // Only show the first node when there are no other nodes
+  // Show nodes - first node is always present, user nodes are added alongside
   const computedNodes = useMemo(() => {
-    const nonFirst = nodes.filter((n) => n.id !== 'first-node');
-    if (nonFirst.length > 0) return nonFirst;
-    // No user nodes → return a fresh placeholder node (avoid reusing state)
-    return [
-      {
-        id: 'first-node',
-        type: 'firstNode',
-        position: { x: 0, y: 0 },
-        data: { label: 'Add First Step' },
-      } as Node,
-    ];
+    return nodes;
   }, [nodes]);
-
-  // Ensure controlled state always contains placeholder when empty so ReactFlow has a node to render
-  React.useEffect(() => {
-    if (nodes.length === 0) {
-      setNodes(initialNodes);
-    }
-  }, [nodes.length]);
-
+  
   return (
-    <div className="w-full h-[calc(100vh-4.5rem)] bg-sidebar px-2 pb-0 pt-0">
-      <div className="w-full h-full bg-sidebar/90 rounded-lg border border-sidebar-border p-2">
-        <ReactFlow
+    <ReactFlowProvider>
+      <div className="w-full h-[calc(100vh-4.5rem)] bg-sidebar px-2 pb-0 pt-0">
+        <div className="w-full h-full bg-sidebar/90 rounded-lg border border-sidebar-border p-2">
+          <ReactFlow
           className="bg-sidebar/95 rounded-lg"
         nodes={computedNodes.map((n) =>
           n.id === 'first-node'
@@ -266,11 +392,12 @@ export default function ReactFlowComponent() {
         onConnect={onConnect}
         onNodeClick={onNodeClick}
         onInit={onInit}
-        >
-          <FloatingControls />
-        </ReactFlow>
-      </div>
-      <ActionToolbar
+          >
+            <FloatingControls />
+            <ViewFitter />
+          </ReactFlow>
+        </div>
+        <ActionToolbar
         open={toolbarOpen}
         onOpenChange={(o) => { setToolbarOpen(o); if (!o) setPendingEdgeFrom(null); }}
         mode={toolbarMode}
@@ -351,8 +478,8 @@ export default function ReactFlowComponent() {
           setConfigForm((s) => (service.key === 'ai_model' ? { formatted_response: false, ...s } : s));
           setConfigTitle(service.title);
         }}
-      />
-
+        />
+      </div>
       <Dialog.Root open={webhookDialogOpen} onOpenChange={setWebhookDialogOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
@@ -502,11 +629,11 @@ export default function ReactFlowComponent() {
                         <div className="space-y-2">
                           <button
                             type="button"
-                            className="text-[11px] rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-muted"
+                            className="block w-full text-left text-[11px] rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-muted"
                             onClick={() => setVarPanelOpen((o) => ({ ...o, [f.key]: !o[f.key] }))}
                           >{varPanelOpen[f.key] ? 'Hide variables' : 'Use previous node output'}</button>
                           {varPanelOpen[f.key] ? (
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                               <select
                                 className="rounded-md border border-border bg-background px-2 py-1"
                                 value={varSelect[f.key] ?? ''}
@@ -529,7 +656,7 @@ export default function ReactFlowComponent() {
                             </div>
                           ) : null}
                           <textarea
-                            className="min-h-24 rounded-md border border-border bg-background p-2 text-sm"
+                            className="w-full min-h-32 resize-y rounded-md border border-border bg-background p-2 text-sm"
                             value={configForm[f.key] ?? ''}
                             onChange={(e) => setConfigForm((s) => ({ ...s, [f.key]: e.target.value }))}
                           />
@@ -664,11 +791,10 @@ export default function ReactFlowComponent() {
                 <Input value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} placeholder="My workflow" />
               </div>
               <div className="flex items-center gap-2 text-sm">
-                <button
-                  type="button"
+                <Switch
+                  checked={saveEnabled}
+                  onCheckedChange={(v) => setSaveEnabled(Boolean(v))}
                   aria-label="Toggle enabled"
-                  className={`h-6 w-10 rounded-full border border-border ${saveEnabled ? 'bg-primary/80' : 'bg-muted'}`}
-                  onClick={() => setSaveEnabled((v) => !v)}
                 />
                 <span className="text-muted-foreground">Enabled</span>
               </div>
@@ -708,6 +834,6 @@ export default function ReactFlowComponent() {
           </DialogPrimitive.Content>
         </DialogPrimitive.Portal>
       </DialogPrimitive.Root>
-    </div>
+    </ReactFlowProvider>
   );
 }

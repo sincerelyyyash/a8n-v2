@@ -25,7 +25,7 @@ const SignupPage: React.FC = () => {
       if (res.status === 200) {
         toast.success("Account created");
         await refresh();
-        router.replace("/home");
+        router.replace("/workflows");
       } else {
         toast.error("Failed to create account");
       }
@@ -50,12 +50,12 @@ const SignupPage: React.FC = () => {
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="firstName">First name</Label>
-                <Input id="firstName" name="firstName" placeholder="Jane" type="text" required aria-label="First name" />
+                <Label htmlFor="first_name">First name</Label>
+                <Input id="first_name" name="first_name" placeholder="Jane" type="text" required aria-label="First name" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="lastName">Last name</Label>
-                <Input id="lastName" name="lastName" placeholder="Doe" type="text" required aria-label="Last name" />
+                <Label htmlFor="last_name">Last name</Label>
+                <Input id="last_name" name="last_name" placeholder="Doe" type="text" required aria-label="Last name" />
               </div>
             </div>
             <div className="space-y-2">

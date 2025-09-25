@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { apiClient, type ApiResponse } from "@/lib/axios";
 import { toast } from "sonner";
 import { useAuth } from "@/components/providers/auth-provider";
+import { Switch } from "@/components/ui/switch";
 
 type Workflow = {
   id: number;
@@ -36,6 +38,7 @@ const StatCard = ({ label, value, helper }: { label: string; value: string; help
 
 export default function WorkflowHome() {
   const { user } = useAuth();
+  const router = useRouter();
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>("");
@@ -478,11 +481,10 @@ export default function WorkflowHome() {
                   <Input id="wf-title" value={createTitle} onChange={(e) => setCreateTitle(e.target.value)} placeholder="My workflow" />
                 </div>
                 <div className="flex items-center gap-2 text-sm">
-                  <button
-                    type="button"
+                  <Switch
+                    checked={createEnabled}
+                    onCheckedChange={(v) => setCreateEnabled(Boolean(v))}
                     aria-label="Toggle enabled"
-                    className={`h-6 w-10 rounded-full border border-border ${createEnabled ? "bg-primary/80" : "bg-muted"}`}
-                    onClick={() => setCreateEnabled((v) => !v)}
                   />
                   <span className="text-muted-foreground">Enabled</span>
                 </div>
@@ -513,6 +515,10 @@ export default function WorkflowHome() {
                         setCreateName("");
                         setCreateTitle("");
                         setCreateEnabled(true);
+                        if (id) {
+                          router.push(`/workflows/${id}`);
+                          return;
+                        }
                         try {
                           const listRes = await apiClient.get<ApiResponse<Workflow[]>>("/api/v1/workflow/all");
                           const data = (listRes.data?.data ?? []) as Workflow[];
@@ -620,7 +626,7 @@ export default function WorkflowHome() {
             ) : (
               paginated.map((wf) => (
                 <div key={wf.id} className="flex items-center justify-between rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm" role="listitem">
-                  <div className="flex min-w-0 flex-col">
+                  <div className="flex min-w-0 flex-col cursor-pointer" onClick={() => router.push(`/workflows/${wf.id}`)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { router.push(`/workflows/${wf.id}`); } }} aria-label={`Open workflow ${wf.title || wf.name}`}>
                     <div className="truncate text-sm font-medium">{wf.title || wf.name}</div>
                     <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                       <span aria-label="scope" className="rounded-full border border-border bg-background px-2 py-0.5">Personal</span>

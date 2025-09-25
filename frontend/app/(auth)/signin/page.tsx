@@ -25,7 +25,7 @@ const SigninPage: React.FC = () => {
       if (res.status === 200) {
         toast.success("Signed in successfully");
         await refresh();
-        router.replace("/home");
+        router.replace("/workflows");
       } else {
         toast.error("Failed to sign in");
       }

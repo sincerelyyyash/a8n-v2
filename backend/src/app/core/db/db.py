@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator
 from typing import Optional
 import os
+from dotenv import load_dotenv
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.ext.asyncio.session import AsyncSession
@@ -10,6 +11,8 @@ from sqlalchemy.orm import DeclarativeBase, MappedAsDataclass
 class Base(DeclarativeBase, MappedAsDataclass):
     pass
 
+
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 

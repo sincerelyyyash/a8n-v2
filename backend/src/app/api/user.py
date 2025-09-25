@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, Cookie
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -8,6 +9,7 @@ from ..core.db.db import async_get_db
 from ..schemas.user_schema import UserCreate, UserRead, UserSignIn
 
 router = APIRouter(prefix="/api/v1/user", tags=["user"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/signup")
@@ -45,7 +47,10 @@ async def register_user(
             "message": "User created successfully",
             "data": {"user": new_user.id, "token": token},
         }
-    except Exception:
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.exception("Unhandled error during user signup")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -73,7 +78,10 @@ async def login_user(
 
         return {"message": "user logged in successfully", "data": {"user": db_user.id, "token": token}}
 
-    except Exception:
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.exception("Unhandled error during user signin")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -94,8 +102,9 @@ async def get_user(token: str | None = Cookie(default=None), db: AsyncSession = 
             raise HTTPException(status_code=404, detail="User not found")
         return {
             "message": "User fetched successfully",
-            "data": UserRead.model_validate(user),
+            "data": UserRead.model_validate(user, from_attributes=True),
         }
 
-    except Exception:
+    except Exception as e:
+        logger.exception("Unhandled error while fetching user info")
         raise HTTPException(status_code=500, detail="Internal server error")

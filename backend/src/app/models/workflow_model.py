@@ -14,6 +14,7 @@ class Workflow(Base):
         unique=True,
         primary_key=True,
         nullable=False,
+        init=False,
     )
 
     name: Mapped[str] = mapped_column(String(18))

@@ -36,43 +36,44 @@ async def create_workflow(
                 status_code=400, detail="Workflow with this name or title exists"
             )
 
-        async with db.begin():
-            new_wf = Workflow(
-                name=workflow.name,
-                title=workflow.title,
-                enabled=workflow.enabled,
-                user_id=authed_user_id,
+        new_wf = Workflow(
+            name=workflow.name,
+            title=workflow.title,
+            enabled=workflow.enabled,
+            user_id=authed_user_id,
+        )
+        db.add(new_wf)
+        await db.flush()
+
+        new_nodes = []
+        client_to_db_id: dict[int, int] = {}
+        for node in workflow.nodes:
+            n = Node(
+                positionX=node.positionX,
+                positionY=node.positionY,
+                data=node.data,
+                workflow_id=new_wf.id,
             )
-            db.add(new_wf)
+            db.add(n)
             await db.flush()
+            new_nodes.append(n)
+            temp_id = node.data.get("temp_id") if isinstance(node.data, dict) else None
+            if temp_id is not None:
+                client_to_db_id[int(temp_id)] = n.id
 
-            new_nodes = []
-            client_to_db_id: dict[int, int] = {}
-            for node in workflow.nodes:
-                n = Node(
-                    positionX=node.positionX,
-                    positionY=node.positionY,
-                    data=node.data,
-                    workflow_id=new_wf.id,
-                )
-                db.add(n)
-                await db.flush()
-                new_nodes.append(n)
-                temp_id = node.data.get("temp_id") if isinstance(node.data, dict) else None
-                if temp_id is not None:
-                    client_to_db_id[int(temp_id)] = n.id
+        new_conns = []
+        for conn in workflow.connections:
+            from_id = client_to_db_id.get(conn.from_node_id, conn.from_node_id)
+            to_id = client_to_db_id.get(conn.to_node_id, conn.to_node_id)
+            c = Connection(
+                from_node_id=from_id,
+                to_node_id=to_id,
+                workflow_id=new_wf.id,
+            )
+            db.add(c)
+            new_conns.append(c)
 
-            new_conns = []
-            for conn in workflow.connections:
-                from_id = client_to_db_id.get(conn.from_node_id, conn.from_node_id)
-                to_id = client_to_db_id.get(conn.to_node_id, conn.to_node_id)
-                c = Connection(
-                    from_node_id=from_id,
-                    to_node_id=to_id,
-                    workflow_id=new_wf.id,
-                )
-                db.add(c)
-                new_conns.append(c)
+        await db.commit()
 
         return {
             "message": "Workflow created successfully",

@@ -6,7 +6,8 @@ import '@xyflow/react/dist/style.css';
 import { CreateFirstNode } from './nodes/FirstNode';
 import { MediaTitleNode } from './nodes/MediaTitleNode';
 import ActionToolbar from './ActionToolbar';
-import { Minus, Plus, Maximize2 } from 'lucide-react';
+import ExecuteButton from './ExecuteButton';
+import { Minus, Plus, Maximize2, Loader2, Play } from 'lucide-react';
 import * as Dialog from "@radix-ui/react-dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,7 @@ const initialEdges: Edge[] = [];
 
 export default function ReactFlowComponent({ workflowId }: { workflowId?: number }) {
   const { user } = useAuth();
+  const [isInitialized, setIsInitialized] = useState(false);
   
   // Start with the first node always present
   const [nodes, setNodes] = useState<Node[]>([
@@ -75,7 +77,6 @@ export default function ReactFlowComponent({ workflowId }: { workflowId?: number
   
   const [edges, setEdges] = useState(initialEdges);
   const [toolbarOpen, setToolbarOpen] = useState(false);
-  const [toolbarMode, setToolbarMode] = useState<"trigger" | "service">("trigger");
   const [pendingEdgeFrom, setPendingEdgeFrom] = useState<string | null>(null);
   const [webhookDialogOpen, setWebhookDialogOpen] = useState(false);
   const [webhookName, setWebhookName] = useState("");
@@ -83,6 +84,7 @@ export default function ReactFlowComponent({ workflowId }: { workflowId?: number
   const [webhookPath, setWebhookPath] = useState("/my-webhook");
   const [webhookHeader, setWebhookHeader] = useState("X-Webhook-Secret");
   const [webhookSecret, setWebhookSecret] = useState("");
+  const [isLoadingWorkflow, setIsLoadingWorkflow] = useState<boolean>(Boolean(workflowId));
   const [configDialog, setConfigDialog] = useState<{ open: boolean; nodeId: string | null; schemaKey: string | null }>({ open: false, nodeId: null, schemaKey: null });
   const [configForm, setConfigForm] = useState<Record<string, any>>({});
   const [configTitle, setConfigTitle] = useState<string>("");
@@ -99,6 +101,93 @@ export default function ReactFlowComponent({ workflowId }: { workflowId?: number
   const [creatingCred, setCreatingCred] = useState<boolean>(false);
   const [varSelect, setVarSelect] = useState<Record<string, string>>({});
   const [varPanelOpen, setVarPanelOpen] = useState<Record<string, boolean>>({});
+  const [nodeExecutionStatus, setNodeExecutionStatus] = useState<Record<string, 'idle' | 'executing' | 'success' | 'error'>>({});
+  const [nodeExecutionResults, setNodeExecutionResults] = useState<Record<string, any>>({});
+  const [workflowInfo, setWorkflowInfo] = useState<{ name?: string; title?: string; id?: number }>({});
+
+  // Function to update node execution status
+  const updateNodeExecutionStatus = React.useCallback((nodeId: string, status: 'idle' | 'executing' | 'success' | 'error', result?: any, error?: string) => {
+    setNodeExecutionStatus(prev => ({ ...prev, [nodeId]: status }));
+    if (result) {
+      setNodeExecutionResults(prev => ({ ...prev, [nodeId]: result }));
+    }
+  }, []);
+
+  // Function to reset all node execution statuses
+  const resetNodeExecutionStatuses = React.useCallback(() => {
+    setNodeExecutionStatus({});
+    setNodeExecutionResults({});
+  }, []);
+
+  // Function to execute individual node
+  const executeNode = React.useCallback(async (nodeId: string) => {
+    if (!workflowId || !user?.id) {
+      toast.error('Workflow ID and user authentication required');
+      return;
+    }
+
+    try {
+      // Set node status to executing
+      updateNodeExecutionStatus(nodeId, 'executing');
+
+      const response = await apiClient.post('/api/v1/execution/node', {
+        workflow_id: workflowId,
+        node_id: parseInt(nodeId),
+        execution_type: 'manual'
+      });
+
+      const { execution_id } = response.data;
+      toast.success('Node execution started');
+      
+      // Poll for this specific node's execution status
+      pollNodeExecutionStatus(execution_id, nodeId);
+      
+    } catch (error: any) {
+      console.error('Node execution error:', error);
+      updateNodeExecutionStatus(nodeId, 'error', undefined, error?.message);
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to execute node';
+      toast.error(errorMessage);
+    }
+  }, [workflowId, user?.id, updateNodeExecutionStatus]);
+
+  // Function to poll individual node execution status
+  const pollNodeExecutionStatus = React.useCallback(async (executionId: string, nodeId: string) => {
+    const maxAttempts = 30; // 2.5 minutes max (5 second intervals)
+    let attempts = 0;
+
+    const poll = async () => {
+      try {
+        const response = await apiClient.get(`/api/v1/execution/status/${executionId}`);
+        const { status: execStatus, result, error } = response.data;
+
+        if (execStatus === 'completed') {
+          updateNodeExecutionStatus(nodeId, 'success', result);
+          toast.success('Node executed successfully');
+          return;
+        } else if (execStatus === 'failed') {
+          updateNodeExecutionStatus(nodeId, 'error', undefined, error);
+          toast.error('Node execution failed');
+          return;
+        } else if (execStatus === 'running' || execStatus === 'queued') {
+          // Continue polling
+          attempts++;
+          if (attempts < maxAttempts) {
+            setTimeout(poll, 5000); // Poll every 5 seconds
+          } else {
+            updateNodeExecutionStatus(nodeId, 'error', undefined, 'Execution timed out');
+            toast.error('Node execution timed out');
+          }
+        }
+      } catch (error) {
+        console.error('Node status polling error:', error);
+        updateNodeExecutionStatus(nodeId, 'error', undefined, 'Failed to check status');
+        toast.error('Failed to check node execution status');
+      }
+    };
+
+    // Start polling after a short delay
+    setTimeout(poll, 2000);
+  }, [updateNodeExecutionStatus]);
 
   const handleQuickSave = React.useCallback(async () => {
     if (!user?.id) { toast.error('Sign in required'); return; }
@@ -160,6 +249,13 @@ export default function ReactFlowComponent({ workflowId }: { workflowId?: number
     return () => window.removeEventListener("open-save-workflow-dialog", handler);
   }, [workflowId, handleQuickSave]);
 
+  // Listen for toolbar toggle event from appbar
+  React.useEffect(() => {
+    const toggleHandler = () => setToolbarOpen((o) => !o);
+    window.addEventListener("toggle-action-toolbar", toggleHandler);
+    return () => window.removeEventListener("toggle-action-toolbar", toggleHandler);
+  }, []);
+
   React.useEffect(() => {
     const loadCreds = async () => {
       if (!user?.id) return;
@@ -175,12 +271,24 @@ export default function ReactFlowComponent({ workflowId }: { workflowId?: number
   // Load existing workflow data when workflowId is provided
   React.useEffect(() => {
     const loadWorkflow = async () => {
-      if (!workflowId || !user?.id) return;
+      if (!workflowId || !user?.id) {
+        // Reset workflow info for new workflows
+        setWorkflowInfo({});
+        return;
+      }
       try {
+        setIsLoadingWorkflow(true);
+        setIsInitialized(false); // Reset initialization state for new workflow
         const res = await apiClient.get(`/api/v1/workflow/?workflow_id=${workflowId}&include_nodes=true`);
         const data = res.data?.data;
         console.log('Loaded workflow data:', data);
         if (data) {
+          // Store workflow information
+          setWorkflowInfo({
+            name: data.name,
+            title: data.title,
+            id: data.id
+          });
           // Convert backend nodes to ReactFlow format
           const loadedNodes: Node[] = data.nodes?.map((node: any) => ({
             id: String(node.id),
@@ -199,7 +307,7 @@ export default function ReactFlowComponent({ workflowId }: { workflowId?: number
                 setNodes((prev) => prev.filter((n) => n.id !== String(node.id)));
                 setEdges((prev) => prev.filter((e) => e.source !== String(node.id) && e.target !== String(node.id)));
               },
-              onAddNext: () => { setToolbarMode('service'); setToolbarOpen(true); setPendingEdgeFrom(String(node.id)); },
+              onAddNext: () => { setToolbarOpen(true); setPendingEdgeFrom(String(node.id)); },
               service: node.data?.service,
             },
           })) || [];
@@ -231,6 +339,8 @@ export default function ReactFlowComponent({ workflowId }: { workflowId?: number
       } catch (e: any) {
         console.error('Failed to load workflow:', e);
         toast.error('Failed to load workflow data');
+      } finally {
+        setIsLoadingWorkflow(false);
       }
     };
     void loadWorkflow();
@@ -308,32 +418,14 @@ export default function ReactFlowComponent({ workflowId }: { workflowId?: number
   }, []);
 
   const onInit = useCallback((instance: any) => {
-    try {
-      instance.fitView({ padding: 0.2, duration: 200 });
-      // Set a more reasonable default zoom level
-      instance.zoomTo(0.7, { duration: 200 });
-    } catch {}
-  }, []);
-
-  // Component to handle view fitting when nodes change
-  const ViewFitter = () => {
-    const rf = useReactFlow();
-    React.useEffect(() => {
+    if (!isInitialized) {
       try {
-        if (nodes.length > 0) {
-          rf.fitView({ padding: 0.2, duration: 200 });
-          // Set a more reasonable zoom level after fitting
-          setTimeout(() => {
-            try {
-              rf.zoomTo(0.7, { duration: 200 });
-            } catch {}
-          }, 250);
-        }
+        // Fit view with padding, but keep the default zoom level
+        instance.fitView({ padding: 0.2, duration: 200 });
+        setIsInitialized(true);
       } catch {}
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [nodes.length]);
-    return null;
-  };
+    }
+  }, [isInitialized]);
 
   const FloatingControls = () => {
     const { zoomIn, zoomOut, fitView } = useReactFlow();
@@ -371,13 +463,20 @@ export default function ReactFlowComponent({ workflowId }: { workflowId?: number
 
   // Show nodes - first node is always present, user nodes are added alongside
   const computedNodes = useMemo(() => {
-    return nodes;
-  }, [nodes]);
+    return nodes.map(node => ({
+      ...node,
+      data: {
+        ...node.data,
+        executionStatus: nodeExecutionStatus[node.id] || 'idle',
+        executionResult: nodeExecutionResults[node.id],
+      }
+    }));
+  }, [nodes, nodeExecutionStatus, nodeExecutionResults]);
   
   return (
     <ReactFlowProvider>
       <div className="w-full h-[calc(100vh-4.5rem)] bg-sidebar px-2 pb-0 pt-0">
-        <div className="w-full h-full bg-sidebar/90 rounded-lg border border-sidebar-border p-2">
+        <div className="relative w-full h-full bg-sidebar/90 rounded-lg border border-sidebar-border p-2">
           <ReactFlow
           className="bg-sidebar/95 rounded-lg"
         nodes={computedNodes.map((n) =>
@@ -392,20 +491,41 @@ export default function ReactFlowComponent({ workflowId }: { workflowId?: number
         onConnect={onConnect}
         onNodeClick={onNodeClick}
         onInit={onInit}
+        defaultViewport={{ x: 0, y: 0, zoom: 0.3 }}
+        minZoom={0.1}
+        maxZoom={2}
           >
             <FloatingControls />
-            <ViewFitter />
+            <ExecuteButton 
+              workflowId={workflowId} 
+              disabled={!workflowId || nodes.length <= 1}
+              onExecutionStart={resetNodeExecutionStatuses}
+              onExecutionComplete={() => {
+                // Reset statuses after a delay to show final states
+                setTimeout(() => {
+                  resetNodeExecutionStatuses();
+                }, 5000);
+              }}
+              onNodeStatusUpdate={updateNodeExecutionStatus}
+            />
           </ReactFlow>
+          {isLoadingWorkflow ? (
+            <div className="pointer-events-none absolute inset-0 z-[300] grid place-items-center rounded-lg bg-background/40">
+              <div className="flex flex-col items-center gap-3">
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" aria-hidden="true" />
+                <div className="text-xs text-muted-foreground" aria-live="polite">Loading workflow…</div>
+              </div>
+            </div>
+          ) : null}
         </div>
         <ActionToolbar
         open={toolbarOpen}
         onOpenChange={(o) => { setToolbarOpen(o); if (!o) setPendingEdgeFrom(null); }}
-        mode={toolbarMode}
         services={[
-          { key: 'ai_model', title: SERVICE_FORMS.ai_model.title, desc: 'Send prompts to an LLM', imageSrc: '/globe.svg' },
-          { key: 'send_email', title: SERVICE_FORMS.send_email.title, desc: 'Deliver an email via SMTP', imageSrc: '/file.svg' },
-          { key: 'send_email_and_wait', title: SERVICE_FORMS.send_email_and_wait.title, desc: 'Email then wait for reply', imageSrc: '/file.svg' },
-          { key: 'telegram_message', title: SERVICE_FORMS.telegram_message.title, desc: 'Send a Telegram message', imageSrc: '/globe.svg' },
+          { key: 'ai_model', title: SERVICE_FORMS.ai_model.title, desc: 'Send prompts to an LLM', imageSrc: '/brain.svg' },
+          { key: 'send_email', title: SERVICE_FORMS.send_email.title, desc: 'Deliver an email via SMTP', imageSrc: '/mail.svg' },
+          { key: 'send_email_and_wait', title: SERVICE_FORMS.send_email_and_wait.title, desc: 'Email then wait for reply', imageSrc: '/mail-wait.svg' },
+          { key: 'telegram_message', title: SERVICE_FORMS.telegram_message.title, desc: 'Send a Telegram message', imageSrc: '/telegram.svg' },
         ]}
         onSelectTrigger={(t) => {
           setToolbarOpen(false);
@@ -425,7 +545,7 @@ export default function ReactFlowComponent({ workflowId }: { workflowId?: number
                 setNodes((prev) => prev.filter((n) => n.id !== baseNode.id));
                 setEdges((prev) => prev.filter((e) => e.source !== baseNode.id && e.target !== baseNode.id));
               },
-              onAddNext: () => { setToolbarMode('service'); setToolbarOpen(true); setPendingEdgeFrom(baseNode.id); },
+              onAddNext: () => { setToolbarOpen(true); setPendingEdgeFrom(baseNode.id); },
               triggerType: t.type,
             },
           } as const;
@@ -464,7 +584,7 @@ export default function ReactFlowComponent({ workflowId }: { workflowId?: number
                 setNodes((prev) => prev.filter((n) => n.id !== id));
                 setEdges((prev) => prev.filter((e) => e.source !== id && e.target !== id));
               },
-              onAddNext: () => { setToolbarMode('service'); setToolbarOpen(true); setPendingEdgeFrom(id); },
+              onAddNext: () => { setToolbarOpen(true); setPendingEdgeFrom(id); },
               service: { key: service.key, data: {} },
             },
           } as const;
@@ -683,32 +803,61 @@ export default function ReactFlowComponent({ workflowId }: { workflowId?: number
                   })}
                 </div>
               ) : null}
-              <div className="pt-2">
-                <Button className="w-full" onClick={() => {
-                  if (!configDialog.nodeId) return;
-                  const key = configDialog.schemaKey || '';
-                  // parse JSON fields
-                  const formCopy: Record<string, any> = { ...configForm };
-                  const fields = key && SERVICE_FORMS[key] ? SERVICE_FORMS[key].fields : [];
-                  for (const f of fields) {
-                    if (f.type === 'json' && typeof formCopy[f.key] === 'string') {
-                      try {
-                        formCopy[f.key] = formCopy[f.key] ? JSON.parse(formCopy[f.key]) : {};
-                      } catch {
-                        toast.error(`Invalid JSON for ${f.label}`);
-                        return;
+              <div className="pt-2 flex gap-2">
+                <Button 
+                  className="flex-1" 
+                  onClick={() => {
+                    if (!configDialog.nodeId) return;
+                    const key = configDialog.schemaKey || '';
+                    // parse JSON fields
+                    const formCopy: Record<string, any> = { ...configForm };
+                    const fields = key && SERVICE_FORMS[key] ? SERVICE_FORMS[key].fields : [];
+                    for (const f of fields) {
+                      if (f.type === 'json' && typeof formCopy[f.key] === 'string') {
+                        try {
+                          formCopy[f.key] = formCopy[f.key] ? JSON.parse(formCopy[f.key]) : {};
+                        } catch {
+                          toast.error(`Invalid JSON for ${f.label}`);
+                          return;
+                        }
+                      }
+                      if (f.key.includes('seconds')) {
+                        const n = Number(formCopy[f.key]);
+                        if (!Number.isNaN(n)) formCopy[f.key] = n;
                       }
                     }
-                    if (f.key.includes('seconds')) {
-                      const n = Number(formCopy[f.key]);
-                      if (!Number.isNaN(n)) formCopy[f.key] = n;
-                    }
-                  }
-                  setNodes((prev) => prev.map((n) => n.id === configDialog.nodeId ? { ...n, data: { ...(n as any).data, service: { key, data: formCopy } } } : n));
-                  setConfigDialog({ open: false, nodeId: null, schemaKey: null });
-                  setConfigForm({});
-                  toast.success('Step configured');
-                }}>Save</Button>
+                    setNodes((prev) => prev.map((n) => n.id === configDialog.nodeId ? { ...n, data: { ...(n as any).data, service: { key, data: formCopy } } } : n));
+                    setConfigDialog({ open: false, nodeId: null, schemaKey: null });
+                    setConfigForm({});
+                    toast.success('Step configured');
+                  }}
+                >
+                  Save
+                </Button>
+                {configDialog.nodeId && configDialog.nodeId !== 'first-node' && (
+                  <Button 
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      if (configDialog.nodeId) {
+                        executeNode(configDialog.nodeId);
+                      }
+                    }}
+                    disabled={nodeExecutionStatus[configDialog.nodeId] === 'executing'}
+                  >
+                    {nodeExecutionStatus[configDialog.nodeId] === 'executing' ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin mr-2" />
+                        Executing...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="size-4 mr-2" />
+                        Execute Node
+                      </>
+                    )}
+                  </Button>
+                )}
               </div>
             </div>
           </DialogPrimitive.Content>

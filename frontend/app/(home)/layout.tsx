@@ -12,7 +12,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <SidebarProvider>
           <AppSidebar />
           <SidebarInset>
-            <main className="flex flex-col w-full h-full bg-sidebar pl-2">
+            <main className="flex flex-col w-full h-full bg-sidebar">
               <WorkflowPageAppbar />
               {children}
             </main>

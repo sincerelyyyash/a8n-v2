@@ -101,16 +101,16 @@ async def execute_workflow(
 
         execution_id = await add_to_execution_queue(execution_data)
 
-        async with db.begin():
-            db.add(
-                Execution(
-                    execution_id=execution_id,
-                    user_id=authed_user_id,
-                    workflow_id=data.workflow_id,
-                    node_id=None,
-                    status=ExecutionStatus.QUEUED.value,
-                )
+        db.add(
+            Execution(
+                execution_id=execution_id,
+                user_id=authed_user_id,
+                workflow_id=data.workflow_id,
+                node_id=None,
+                status=ExecutionStatus.QUEUED.value,
             )
+        )
+        await db.commit()
         
         return ExecutionResponse(
             execution_id=execution_id,
@@ -190,16 +190,16 @@ async def execute_node(
 
         execution_id = await add_to_execution_queue(execution_data)
 
-        async with db.begin():
-            db.add(
-                Execution(
-                    execution_id=execution_id,
-                    user_id=authed_user_id,
-                    workflow_id=data.workflow_id,
-                    node_id=data.node_id,
-                    status=ExecutionStatus.QUEUED.value,
-                )
+        db.add(
+            Execution(
+                execution_id=execution_id,
+                user_id=authed_user_id,
+                workflow_id=data.workflow_id,
+                node_id=data.node_id,
+                status=ExecutionStatus.QUEUED.value,
             )
+        )
+        await db.commit()
         
         return ExecutionResponse(
             execution_id=execution_id,
@@ -247,12 +247,12 @@ async def update_execution_status_endpoint(
         if not execution:
             raise HTTPException(status_code=404, detail="Execution not found")
 
-        async with db.begin():
-            execution.status = data.status.value
-            if data.result is not None:
-                execution.result = data.result
-            if data.error is not None:
-                execution.error = data.error
+        execution.status = data.status.value
+        if data.result is not None:
+            execution.result = data.result
+        if data.error is not None:
+            execution.error = data.error
+        await db.commit()
         return {"message": "Status updated"}
     except HTTPException:
         raise

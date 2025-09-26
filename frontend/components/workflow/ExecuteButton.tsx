@@ -10,6 +10,18 @@ import { useAuth } from '@/components/providers/auth-provider';
 
 type ExecutionStatus = 'idle' | 'executing' | 'success' | 'error';
 
+const extractErrorMessage = (error: any): string => {
+  const detail = error?.response?.data?.detail;
+  if (Array.isArray(detail) && detail.length > 0) {
+    const first = detail[0];
+    if (typeof first === 'string') return first;
+    if (first?.msg) return String(first.msg);
+    return JSON.stringify(first);
+  }
+  if (typeof detail === 'string') return detail;
+  return error?.message || 'Failed to execute workflow';
+};
+
 interface ExecuteButtonProps {
   workflowId?: number;
   disabled?: boolean;
@@ -44,7 +56,7 @@ export const ExecuteButton: React.FC<ExecuteButtonProps> = ({
 
       const response = await apiClient.post('/api/v1/execution/workflow', {
         workflow_id: workflowId,
-        execution_type: 'manual'
+        execution_type: 'workflow'
       });
 
       const { execution_id } = response.data;
@@ -58,7 +70,7 @@ export const ExecuteButton: React.FC<ExecuteButtonProps> = ({
     } catch (error: any) {
       console.error('Execution error:', error);
       setStatus('error');
-      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to execute workflow';
+      const errorMessage = extractErrorMessage(error);
       toast.error(errorMessage);
       
       // Reset status after 3 seconds
